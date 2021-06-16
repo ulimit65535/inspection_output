@@ -1,0 +1,5 @@
+.idea
+venv
+*.xls
+*.xlsx
+config.yml
