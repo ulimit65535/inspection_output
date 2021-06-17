@@ -3,3 +3,5 @@ venv
 *.xls
 *.xlsx
 config.yml
+temp/*
+!temp/.gitkeep

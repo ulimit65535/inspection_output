@@ -26,16 +26,14 @@ class BasicConfig:
             with open(config_file, 'r', encoding='utf-8') as f:
                 self.config = yaml.load(f.read(), Loader=yaml.FullLoader)
         except Exception as e:
-            logging.error('加载配置文件失败:{}'.format(e))
-            sys.exit(1)
+            raise SystemExit('加载配置文件失败:{}'.format(e))
 
         try:
             workbook = xlrd.open_workbook(host_file)
             sheet = workbook.sheets()[0]
             self.ip_list = sheet.col_values(0)
         except Exception as e:
-            logging.error('加载主机列表文件失败:{}'.format(e))
-            sys.exit(1)
+            raise SystemExit('获取主机列表失败:{}'.format(e))
 
     def get_config(self):
         return self.config
@@ -46,18 +44,12 @@ class BasicConfig:
     def get_bk_config(self):
         try:
             bk_config = self.config['bk']
-            if 'cookie' not in bk_config:
-                logging.error('缺少cookie配置项.')
-                sys.exit(1)
-            if 'csrf_token' not in bk_config:
-                logging.error('缺少csrf_token配置项.')
-                sys.exit(1)
-            if 'max_threads' not in bk_config:
-                logging.error('缺少max_threads配置项.')
-                sys.exit(1)
+            for key in ['cookie', 'csrf_token', 'max_threads']:
+                if key not in bk_config.keys():
+                    raise SystemExit('bk缺少配置项:{}'.format(key))
             return bk_config
         except Exception as e:
-            logging.error('缺少bk配置项:{}'.format(e))
+            raise SystemExit('缺少bk配置项:{}'.format(e))
 
 
 class BkRoles(object):
@@ -108,7 +100,7 @@ class BkRoles(object):
                     async with session.post(self._url, data=request_param, headers=self._get_header()) as response:
                         data = await response.read()
                         data_list = json.loads(data)['data']['data']['series']
-                        if key == '数据盘使用率':
+                        if key in ['数据盘使用率']:
                             mount_point_list = []
                             for data in data_list:
                                 if data['name'].startswith('[挂载点: /data') or data['name'].startswith('[挂载点: /apps'):
@@ -129,8 +121,7 @@ class BkRoles(object):
                                 result_dict[key] = data_max
                         else:
                             data = data_list[0]
-                            item_dict = {}
-                            item_dict['data'] = data['data']
+                            item_dict = {'data': data['data']}
                             if data['name'] == '总览':
                                 item_dict['name'] = key
                             else:
@@ -179,15 +170,54 @@ class BkRoles(object):
             event_loop.close()
 
 
+class GeneratorMarkdown(object):
+    def __init__(self, input_data):
+        self.data_system = input_data['system']
+
+    def generator_normal_md(self, data, filename, command):
+        try:
+            status = 0
+            if not os.path.exists(f'{self.temp_dir}/{filename}.md'):
+                if os.path.exists(f'{self.temp_templates}/{filename}.md'):
+                    shutil.copy(f'{self.temp_templates}/{filename}.md', f'{self.temp_dir}/{filename}.md')
+                    status = 1
+                else:
+                    logging.error(
+                        f'当前处理服务器:{self.ip},从{self.temp_templates}复制模板{filename}.md失败,请检查{self.temp_templates}中是否存在{filename}.md模板文件')
+            else:
+                status = 1
+            if status == 1:
+                with open(f'{self.temp_dir}/{filename}.md', 'a', encoding='utf-8') as f:
+                    data = re.sub('\n', '<br>', data)
+                    f.write(f'{self.ip} | {data} | {self.remarks} | {command}' + '\n')
+        except Exception as e:
+            logging.error(f'generator_normal_md函数执行错误,message：{e}')
+
+
 if __name__ == '__main__':
+    """
     basic_config = BasicConfig()
     ip_list = basic_config.get_ip_list()
     bk_config = basic_config.get_bk_config()
 
     bk = BkRoles(ip_list, bk_config)
     bk.eventloop()
+    """
 
-    pf = pd.DataFrame(list(bk.results))
-    order = ['ip', 'cpu总使用率', '应用内存使用率', '数据盘使用率']
-    pf = pf[order]
-    pf.to_excel('output/result.xls', encoding='utf-8', index=False)
+    results = [{
+            'ip': '10.91.4.1',
+            'cpu总使用率': '16.84%',
+            '应用内存使用率': '31.3%',
+            '数据盘使用率': '41.96%'
+        },
+        {
+            'ip': '10.91.4.2',
+            'cpu总使用率': '3.82%',
+            '应用内存使用率': '16.89%',
+            '数据盘使用率': '49.38%'
+        }
+    ]
+
+    data = {'system': results}
+    gm = GeneratorMarkdown(data)
+

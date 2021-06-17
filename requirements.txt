@@ -1,1 +1,6 @@
 pyyaml
+xlrd
+xlwt
+aiohttp
+pandas
+pytz
