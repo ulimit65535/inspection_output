@@ -5,3 +5,5 @@ venv
 config.yml
 temp/*
 !temp/.gitkeep
+output/*
+!output/.gitkeep

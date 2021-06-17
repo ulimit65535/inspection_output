@@ -5,7 +5,11 @@
 import asyncio
 import datetime
 import json
+import os
+import re
+import shutil
 import sys
+import time
 
 import aiohttp
 import pandas as pd
@@ -14,13 +18,13 @@ import pytz
 import xlrd
 import yaml
 
-
 logging.basicConfig(stream=sys.stdout, format='[%(levelname)s %(asctime)s] %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S', level=logging.INFO)
 
 
 class BasicConfig:
     """该类初始化一些配置"""
+
     def __init__(self, config_file='config.yml', host_file='ip_list.xls'):
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
@@ -51,6 +55,20 @@ class BasicConfig:
         except Exception as e:
             raise SystemExit('缺少bk配置项:{}'.format(e))
 
+    def get_thresholds(self):
+        try:
+            thresholds = self.config['threshold']
+            return thresholds
+        except Exception as e:
+            raise SystemExit('缺少threshold配置项:{}'.format(e))
+
+    def get_system_name(self):
+        try:
+            system_name = self.config['system_name']
+            return system_name
+        except Exception as e:
+            raise SystemExit('缺少system_name配置项:{}'.format(e))
+
 
 class BkRoles(object):
     def __init__(self, ip_list, bk_config):
@@ -66,7 +84,11 @@ class BkRoles(object):
         }
         self._bk_biz_id = 102
         self._url = self._host + '/o/bk_monitor/rest/v1/performance/host_index/graph_point/'
-        self.results = []
+        self.results = {
+            'cpu总使用率': [],
+            '应用内存使用率': [],
+            '数据盘使用率': []
+        }
         utc_tz = pytz.timezone('Asia/Shanghai')
         now = datetime.datetime.now(tz=utc_tz)
         ago_1h = now - datetime.timedelta(hours=1)
@@ -92,8 +114,9 @@ class BkRoles(object):
             'time_range': self._time_range,
             'time_step': 1
         }
-        result_dict = {}
+
         for key, value in self._index_id_dict.items():
+            result_dict = {}
             request_param['index_id'] = value
             try:
                 async with aiohttp.ClientSession() as session:
@@ -115,10 +138,10 @@ class BkRoles(object):
                                     mount_point_list.append(data_max)
                             if mount_point_list:
                                 data_max = max(mount_point_list)
-                                result_dict[key] = str(data_max) + "%"
+                                result_dict[ip] = str(data_max) + "%"
                             else:
                                 data_max = '/'
-                                result_dict[key] = data_max
+                                result_dict[ip] = data_max
                         else:
                             data = data_list[0]
                             item_dict = {'data': data['data']}
@@ -134,14 +157,11 @@ class BkRoles(object):
                                 except:
                                     pass
                             data_max = max(data_list_new)
-                            if item_dict['name']:
-                                result_dict[item_dict['name']] = str(data_max) + "%"
-                            else:
-                                result_dict[key] = str(data_max) + "%"
+                            result_dict[ip] = str(data_max) + "%"
             except Exception:
                 await asyncio.sleep(self._max_threads)  # 这里
-        result_dict['ip'] = ip
-        self.results.append(result_dict)
+
+            self.results[key].append(result_dict)
 
     # 处理任务（从队列中获取链接）
     async def handle_tasks(self, task_id, work_queue):
@@ -149,8 +169,8 @@ class BkRoles(object):
             current_ip = await work_queue.get()
             try:
                 task_status = await self.get_results(current_ip)
-            except Exception:
-                logging.exception('Error for {}'.format(current_ip), exc_info=True)
+            except Exception as e:
+                logging.warning('Error for {}:{}'.format(current_ip, e))
 
     def eventloop(self):
         q = asyncio.Queue()  # 队列
@@ -170,28 +190,64 @@ class BkRoles(object):
             event_loop.close()
 
 
-class GeneratorMarkdown(object):
-    def __init__(self, input_data):
-        self.data_system = input_data['system']
+class GeneratorOutput(object):
+    def __init__(self, system_name, results, thresolds):
+        self.system_name = system_name
+        self.data = results
+        self.thresolds = thresolds
 
-    def generator_normal_md(self, data, filename, command):
-        try:
-            status = 0
-            if not os.path.exists(f'{self.temp_dir}/{filename}.md'):
-                if os.path.exists(f'{self.temp_templates}/{filename}.md'):
-                    shutil.copy(f'{self.temp_templates}/{filename}.md', f'{self.temp_dir}/{filename}.md')
-                    status = 1
-                else:
-                    logging.error(
-                        f'当前处理服务器:{self.ip},从{self.temp_templates}复制模板{filename}.md失败,请检查{self.temp_templates}中是否存在{filename}.md模板文件')
+    def generator_abnormal_md(self):
+        for key in self.data.keys():
+            abnormal_data = []
+            for d in self.data[key]:
+                (ip, value), = d.items()
+                try:
+                    value = float(value.split('%')[0])
+                    thresold = float(self.thresolds[key].split('%')[0])
+                except Exception as e:
+                    logging.warning('{}百分比转换类型失败:{}'.format(key, e))
+                    break
+                if value > thresold:
+                    abnormal_data.append(d)
+            file_md = 'temp/{}.md'.format(key)
+            shutil.copy('templates/{}.md'.format(key), file_md)
+            if abnormal_data:
+                with open(file_md, 'a', encoding='utf-8') as f:
+                    for d in abnormal_data:
+                        (ip, value), = d.items()
+                        f.write('{} | {}'.format(ip, value) + '\n')
+
+    def aggregator_abnormal(self):
+        output_file = 'output/{}.md'.format('巡检报告')
+        if os.path.exists(output_file):
+            os.remove(output_file)
+        ivo = list(self.data.keys())
+        extand_name = '巡检报告'
+        ivo.insert(0, extand_name)
+        for key in ivo:
+            if key != extand_name:
+                filename = key + '.md'
             else:
-                status = 1
-            if status == 1:
-                with open(f'{self.temp_dir}/{filename}.md', 'a', encoding='utf-8') as f:
-                    data = re.sub('\n', '<br>', data)
-                    f.write(f'{self.ip} | {data} | {self.remarks} | {command}' + '\n')
-        except Exception as e:
-            logging.error(f'generator_normal_md函数执行错误,message：{e}')
+                filename = extand_name + '.md'
+                pc_count = 0
+                err_pc_count = 0
+                err_pc_list = []
+                alldata_name = '详细数据记录'
+                with open('templates/{}'.format(filename), 'r', encoding='utf-8') as f, open(
+                        'temp/{}'.format(filename), 'w', encoding='utf-8') as f2:
+                    f2.write(f.read().format(self.system_name, time.strftime('%Y/%m/%d  %H:%M:%S'),
+                                              pc_count, err_pc_count, err_pc_list, alldata_name))
+
+            with open('temp/{}'.format(filename), 'r', encoding='utf-8')as f, open(
+                    output_file, 'a', encoding='utf-8') as f2:
+                data = f.read()
+                result = re.findall(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", data.split('\n')[-2])
+                if result or filename == '巡检报告.md':
+                    f2.write(data + '\n')
+                else:
+                    f2.write(data)
+                    if not result:
+                        f2.write('所有服务器检查正常|' + '\n\n')
 
 
 if __name__ == '__main__':
@@ -202,22 +258,17 @@ if __name__ == '__main__':
 
     bk = BkRoles(ip_list, bk_config)
     bk.eventloop()
+    print(bk.results)
+    sys.exit(1)
     """
 
-    results = [{
-            'ip': '10.91.4.1',
-            'cpu总使用率': '16.84%',
-            '应用内存使用率': '31.3%',
-            '数据盘使用率': '41.96%'
-        },
-        {
-            'ip': '10.91.4.2',
-            'cpu总使用率': '3.82%',
-            '应用内存使用率': '16.89%',
-            '数据盘使用率': '49.38%'
-        }
-    ]
+    results = {'cpu总使用率': [{'10.91.4.1': '35.16%'}, {'10.91.4.2': '16.35%'}],
+               '应用内存使用率': [{'10.91.4.2': '18.61%'}, {'10.91.4.1': '32.11%'}],
+               '数据盘使用率': [{'10.91.4.2': '49.57%'}, {'10.91.4.1': '43.44%'}]}
 
-    data = {'system': results}
-    gm = GeneratorMarkdown(data)
-
+    basic_config = BasicConfig()
+    thresholds = basic_config.get_thresholds()
+    system_name = basic_config.get_system_name()
+    gm = GeneratorOutput(system_name, results, thresholds)
+    gm.generator_abnormal_md()
+    gm.aggregator_abnormal()

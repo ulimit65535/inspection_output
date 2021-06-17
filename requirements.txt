@@ -4,3 +4,4 @@ xlwt
 aiohttp
 pandas
 pytz
+tabulate
