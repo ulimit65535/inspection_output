@@ -2,4 +2,13 @@ bk:
   cookie:
     xxxxxx
   csrf_token:
-    xxx
+    xxxxxx
+  max_threads: 10
+  host: https://bkpaas.xxx.com
+
+threshold:
+  CPU总使用率: 80%
+  应用内存使用率: 80%
+  数据盘使用率: 80%
+
+system_name: XXX

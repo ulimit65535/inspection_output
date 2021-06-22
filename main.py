@@ -78,17 +78,19 @@ class BkRoles(object):
         self._max_threads = bk_config['max_threads']
         self._host = bk_config['host']
         self._index_id_dict = {
-            'cpu总使用率': 7,
+            'CPU总使用率': 7,
             '应用内存使用率': 99,
             '数据盘使用率': 81
         }
         self._bk_biz_id = 102
         self._url = self._host + '/o/bk_monitor/rest/v1/performance/host_index/graph_point/'
-        self.results = {
-            'cpu总使用率': [],
+        self.data = {
+            'CPU总使用率': [],
             '应用内存使用率': [],
             '数据盘使用率': []
         }
+        self.total_num = len(ip_list)
+        self.error_num = 0
         utc_tz = pytz.timezone('Asia/Shanghai')
         now = datetime.datetime.now(tz=utc_tz)
         ago_1h = now - datetime.timedelta(hours=1)
@@ -105,7 +107,7 @@ class BkRoles(object):
         }
 
     # 获取结果
-    async def get_results(self, ip):
+    async def bk_requests(self, ip):
         host_id = '{}|2'.format(ip)
         request_param = {
             'bk_biz_id': self._bk_biz_id,
@@ -140,7 +142,7 @@ class BkRoles(object):
                                 data_max = max(mount_point_list)
                                 result_dict[ip] = str(data_max) + "%"
                             else:
-                                data_max = '/'
+                                data_max = '0.00%'
                                 result_dict[ip] = data_max
                         else:
                             data = data_list[0]
@@ -159,16 +161,17 @@ class BkRoles(object):
                             data_max = max(data_list_new)
                             result_dict[ip] = str(data_max) + "%"
             except Exception:
+                self.error_num += 1
                 await asyncio.sleep(self._max_threads)  # 这里
-
-            self.results[key].append(result_dict)
+                break
+            self.data[key].append(result_dict)
 
     # 处理任务（从队列中获取链接）
     async def handle_tasks(self, task_id, work_queue):
         while not work_queue.empty():
             current_ip = await work_queue.get()
             try:
-                task_status = await self.get_results(current_ip)
+                task_status = await self.bk_requests(current_ip)
             except Exception as e:
                 logging.warning('Error for {}:{}'.format(current_ip, e))
 
@@ -189,14 +192,25 @@ class BkRoles(object):
         finally:
             event_loop.close()
 
+    def get_results(self):
+        results = {
+            'total_num': self.total_num,
+            'error_num': self.error_num,
+            'data': self.data
+        }
+        return results
+
 
 class GeneratorOutput(object):
     def __init__(self, system_name, results, thresolds):
         self.system_name = system_name
-        self.data = results
+        self.data = results['data']
+        self.total_num = results['total_num']
+        self.error_num = results['error_num']
         self.thresolds = thresolds
 
-    def generator_abnormal_md(self):
+    def generator_md(self):
+        print(self.data)
         for key in self.data.keys():
             abnormal_data = []
             for d in self.data[key]:
@@ -210,33 +224,44 @@ class GeneratorOutput(object):
                 if value > thresold:
                     abnormal_data.append(d)
             file_md = 'temp/{}.md'.format(key)
-            shutil.copy('templates/{}.md'.format(key), file_md)
-            if abnormal_data:
-                with open(file_md, 'a', encoding='utf-8') as f:
+            with open(file_md, 'w', encoding='utf-8') as f:
+                f.write('### {}检查\n\n'.format(key))
+                if abnormal_data:
                     for d in abnormal_data:
-                        (ip, value), = d.items()
-                        f.write('{} | {}'.format(ip, value) + '\n')
+                        if abnormal_data:
+                            f.write('> 使用率大于{}，检测异常。异常数量总计：__{}__\n\n'.format(
+                                self.thresolds[key], len(abnormal_data)))
+                            f.write('IP | {}\n'.format(key))
+                            f.write('-----|-----\n')
+                            (ip, value), = d.items()
+                            f.write('{} | {}'.format(ip, value) + '\n')
+                else:
+                    f.write('> 使用率均小于{}，所有服务器正常。\n'.format(self.thresolds[key]))
 
-    def aggregator_abnormal(self):
-        output_file = 'output/{}.md'.format('巡检报告')
+    def aggregator_md(self):
+        template_file = 'templates/巡检报告.md'
+        output_file = 'output/巡检报告.md'
         if os.path.exists(output_file):
             os.remove(output_file)
-        ivo = list(self.data.keys())
-        extand_name = '巡检报告'
-        ivo.insert(0, extand_name)
-        for key in ivo:
-            if key != extand_name:
-                filename = key + '.md'
-            else:
-                filename = extand_name + '.md'
-                pc_count = 0
-                err_pc_count = 0
-                err_pc_list = []
-                alldata_name = '详细数据记录'
-                with open('templates/{}'.format(filename), 'r', encoding='utf-8') as f, open(
-                        'temp/{}'.format(filename), 'w', encoding='utf-8') as f2:
-                    f2.write(f.read().format(self.system_name, time.strftime('%Y/%m/%d  %H:%M:%S'),
-                                              pc_count, err_pc_count, err_pc_list, alldata_name))
+
+        pc_count = len(self.data[0])
+        err_pc_list = []
+        with open(template_file, 'r', encoding='utf-8') as f, \
+                open(output_file, 'w', encoding='utf-8') as f2:
+            f2.write(f.read().format(self.system_name, time.strftime('%Y/%m/%d  %H:%M:%S'),
+                                     pc_count, len(err_pc_list)))
+            if err_pc_list:
+                f2.write('> 采集异常主机列表:\n\n')
+                f2.write('IP |\n')
+                f2.write('-----|\n')
+                for ip in err_pc_list:
+                    f2.write('{} |'.format(ip) + '\n')
+
+            f2.write('## 三、巡检内容\n\n')
+            f2.write('以下是对CPU总使用率、应用内存使用率、数据盘使用率的数据简报。\n')
+
+        for key in self.data.keys():
+            filename = key + '.md'
 
             with open('temp/{}'.format(filename), 'r', encoding='utf-8')as f, open(
                     output_file, 'a', encoding='utf-8') as f2:
@@ -251,24 +276,20 @@ class GeneratorOutput(object):
 
 
 if __name__ == '__main__':
-    """
     basic_config = BasicConfig()
     ip_list = basic_config.get_ip_list()
     bk_config = basic_config.get_bk_config()
 
     bk = BkRoles(ip_list, bk_config)
     bk.eventloop()
-    print(bk.results)
+    print(bk.get_results())
     sys.exit(1)
-    """
 
-    results = {'cpu总使用率': [{'10.91.4.1': '35.16%'}, {'10.91.4.2': '16.35%'}],
-               '应用内存使用率': [{'10.91.4.2': '18.61%'}, {'10.91.4.1': '32.11%'}],
-               '数据盘使用率': [{'10.91.4.2': '49.57%'}, {'10.91.4.1': '43.44%'}]}
+    results = bk.results
 
     basic_config = BasicConfig()
     thresholds = basic_config.get_thresholds()
     system_name = basic_config.get_system_name()
     gm = GeneratorOutput(system_name, results, thresholds)
-    gm.generator_abnormal_md()
-    gm.aggregator_abnormal()
+    gm.generator_md()
+    gm.aggregator_md()
