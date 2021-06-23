@@ -223,14 +223,13 @@ class GeneratorOutput(object):
             with open(file_md, 'w', encoding='utf-8') as f:
                 f.write('### {}检查\n\n'.format(key))
                 if abnormal_data:
+                    f.write('> 使用率大于{}，检测异常。异常数量总计：__{}__\n\n'.format(
+                        self.thresolds[key], len(abnormal_data)))
+                    f.write('IP | {}\n'.format(key))
                     for d in abnormal_data:
-                        if abnormal_data:
-                            f.write('> 使用率大于{}，检测异常。异常数量总计：__{}__\n\n'.format(
-                                self.thresolds[key], len(abnormal_data)))
-                            f.write('IP | {}\n'.format(key))
-                            f.write('-----|-----\n')
-                            (ip, value), = d.items()
-                            f.write('{} | {}'.format(ip, value) + '\n')
+                        f.write('-----|-----\n')
+                        (ip, value), = d.items()
+                        f.write('{} | {}'.format(ip, value) + '\n')
                 else:
                     f.write('> 使用率均小于{}，所有服务器正常。\n'.format(self.thresolds[key]))
 
