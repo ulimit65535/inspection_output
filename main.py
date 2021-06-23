@@ -6,13 +6,10 @@ import asyncio
 import datetime
 import json
 import os
-import re
-import shutil
 import sys
 import time
 
 import aiohttp
-import pandas as pd
 import logging
 import pytz
 import xlrd
@@ -90,7 +87,7 @@ class BkRoles(object):
             '数据盘使用率': []
         }
         self.total_num = len(ip_list)
-        self.error_num = 0
+        self.error_list = []
         utc_tz = pytz.timezone('Asia/Shanghai')
         now = datetime.datetime.now(tz=utc_tz)
         ago_1h = now - datetime.timedelta(hours=1)
@@ -161,7 +158,7 @@ class BkRoles(object):
                             data_max = max(data_list_new)
                             result_dict[ip] = str(data_max) + "%"
             except Exception:
-                self.error_num += 1
+                self.error_list.append(ip)
                 await asyncio.sleep(self._max_threads)  # 这里
                 break
             self.data[key].append(result_dict)
@@ -195,7 +192,7 @@ class BkRoles(object):
     def get_results(self):
         results = {
             'total_num': self.total_num,
-            'error_num': self.error_num,
+            'error_list': self.error_list,
             'data': self.data
         }
         return results
@@ -206,11 +203,10 @@ class GeneratorOutput(object):
         self.system_name = system_name
         self.data = results['data']
         self.total_num = results['total_num']
-        self.error_num = results['error_num']
+        self.error_list = results['error_list']
         self.thresolds = thresolds
 
     def generator_md(self):
-        print(self.data)
         for key in self.data.keys():
             abnormal_data = []
             for d in self.data[key]:
@@ -244,17 +240,15 @@ class GeneratorOutput(object):
         if os.path.exists(output_file):
             os.remove(output_file)
 
-        pc_count = len(self.data[0])
-        err_pc_list = []
         with open(template_file, 'r', encoding='utf-8') as f, \
                 open(output_file, 'w', encoding='utf-8') as f2:
             f2.write(f.read().format(self.system_name, time.strftime('%Y/%m/%d  %H:%M:%S'),
-                                     pc_count, len(err_pc_list)))
-            if err_pc_list:
+                                     self.total_num, len(self.error_list)))
+            if self.error_list:
                 f2.write('> 采集异常主机列表:\n\n')
                 f2.write('IP |\n')
                 f2.write('-----|\n')
-                for ip in err_pc_list:
+                for ip in self.error_list:
                     f2.write('{} |'.format(ip) + '\n')
 
             f2.write('## 三、巡检内容\n\n')
@@ -266,30 +260,28 @@ class GeneratorOutput(object):
             with open('temp/{}'.format(filename), 'r', encoding='utf-8')as f, open(
                     output_file, 'a', encoding='utf-8') as f2:
                 data = f.read()
-                result = re.findall(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", data.split('\n')[-2])
-                if result or filename == '巡检报告.md':
-                    f2.write(data + '\n')
-                else:
-                    f2.write(data)
-                    if not result:
-                        f2.write('所有服务器检查正常|' + '\n\n')
+                f2.write(data)
+
+        if os.path.exists('temp/异常纪录.md'):
+            with open('temp/异常纪录.md', 'r', encoding='utf-8')as f, open(
+                    output_file, 'a', encoding='utf-8') as f2:
+                data = f.read()
+                f2.write(data)
 
 
 if __name__ == '__main__':
     basic_config = BasicConfig()
     ip_list = basic_config.get_ip_list()
     bk_config = basic_config.get_bk_config()
+    thresholds = basic_config.get_thresholds()
+    system_name = basic_config.get_system_name()
 
     bk = BkRoles(ip_list, bk_config)
     bk.eventloop()
-    print(bk.get_results())
-    sys.exit(1)
+    results = bk.get_results()
 
-    results = bk.results
-
-    basic_config = BasicConfig()
-    thresholds = basic_config.get_thresholds()
-    system_name = basic_config.get_system_name()
     gm = GeneratorOutput(system_name, results, thresholds)
     gm.generator_md()
     gm.aggregator_md()
+
+
