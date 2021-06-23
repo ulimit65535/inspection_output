@@ -230,8 +230,9 @@ class GeneratorOutput(object):
                     for d in abnormal_data:
                         (ip, value), = d.items()
                         f.write('{} | {}'.format(ip, value) + '\n')
+                    f.write('\n')
                 else:
-                    f.write('> 使用率均小于{}，所有服务器正常。\n'.format(self.thresolds[key]))
+                    f.write('> 使用率均小于{}，所有服务器正常。\n\n'.format(self.thresolds[key]))
 
     def aggregator_md(self):
         template_file = 'templates/巡检报告.md'
