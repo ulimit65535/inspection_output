@@ -226,8 +226,8 @@ class GeneratorOutput(object):
                     f.write('> 使用率大于{}，检测异常。异常数量总计：__{}__\n\n'.format(
                         self.thresolds[key], len(abnormal_data)))
                     f.write('IP | {}\n'.format(key))
+                    f.write('-----|-----\n')
                     for d in abnormal_data:
-                        f.write('-----|-----\n')
                         (ip, value), = d.items()
                         f.write('{} | {}'.format(ip, value) + '\n')
                 else:
