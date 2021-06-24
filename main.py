@@ -251,7 +251,7 @@ class GeneratorOutput(object):
                 for ip in self.error_list:
                     f2.write('{} |'.format(ip) + '\n')
 
-            f2.write('## 三、巡检内容\n\n')
+            f2.write('\n## 三、巡检内容\n\n')
             f2.write('以下是对CPU总使用率、应用内存使用率、数据盘使用率的数据简报。\n')
 
         for key in self.data.keys():
