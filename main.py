@@ -14,6 +14,7 @@ import logging
 import pytz
 import xlrd
 import yaml
+import pandas as pd
 
 logging.basicConfig(stream=sys.stdout, format='[%(levelname)s %(asctime)s] %(message)s',
                     datefmt='%Y-%m-%d %H:%M:%S', level=logging.INFO)
@@ -236,7 +237,10 @@ class GeneratorOutput(object):
 
     def aggregator_md(self):
         template_file = 'templates/巡检报告.md'
-        output_file = 'output/巡检报告.md'
+        today = datetime.date.today()
+        monday = (today - datetime.timedelta(today.weekday())).strftime('%Y%m%d')
+        sunday = (today + datetime.timedelta(7 - today.weekday() - 1)).strftime('%Y%m%d')
+        output_file = 'output/周巡检报告{}-{}.md'.format(monday, sunday)
         if os.path.exists(output_file):
             os.remove(output_file)
 
@@ -268,6 +272,25 @@ class GeneratorOutput(object):
                 data = f.read()
                 f2.write(data)
 
+    def generator_excel(self):
+        output_file = 'output/点检纪录表{}.xls'.format(datetime.date.today().strftime('%Y%m%d'))
+        data = self.data
+        pf_list = []
+        for key in data.keys():
+            keys = []
+            vals = []
+            for a1 in self.data[key]:
+                for k, v in a1.items():
+                    keys.append(k)
+                    vals.append(v)
+            pf = pd.DataFrame({'ip': keys, key: vals})
+            pf_list.append(pf)
+        pfa = pf_list[0]
+        for i in range(len(pf_list) -1):
+            i = i + 1
+            pfa = pd.merge(pfa, pf_list[i], on=['ip'], how='outer')
+        pfa.to_excel(output_file, encoding='utf-8', index=False)
+
 
 if __name__ == '__main__':
     basic_config = BasicConfig()
@@ -283,5 +306,8 @@ if __name__ == '__main__':
     gm = GeneratorOutput(system_name, results, thresholds)
     gm.generator_md()
     gm.aggregator_md()
+    gm.generator_excel()
+
+
 
 
