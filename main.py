@@ -159,9 +159,10 @@ class BkRoles(object):
                             data_max = max(data_list_new)
                             result_dict[ip] = str(data_max) + "%"
             except Exception:
-                self.error_list.append(ip)
+                #self.error_list.append(ip)
                 await asyncio.sleep(self._max_threads)  # 这里
-                break
+                raise Exception('请求失败!')
+                #break
             self.data[key].append(result_dict)
 
     # 处理任务（从队列中获取链接）
@@ -171,7 +172,13 @@ class BkRoles(object):
             try:
                 task_status = await self.bk_requests(current_ip)
             except Exception as e:
-                logging.warning('Error for {}:{}'.format(current_ip, e))
+                logging.warning('Error for {}:{},retry...'.format(current_ip, e))
+                try:
+                    task_status = await self.bk_requests(current_ip)
+                except Exception as e:
+                    self.error_list.append(current_ip)
+                    logging.error('Error for {}:{}'.format(current_ip, e))
+
 
     def eventloop(self):
         q = asyncio.Queue()  # 队列
@@ -250,10 +257,10 @@ class GeneratorOutput(object):
                                      self.total_num, len(self.error_list)))
             if self.error_list:
                 f2.write('> 采集异常主机列表:\n\n')
-                f2.write('IP |\n')
-                f2.write('-----|\n')
+                f2.write('IP | 原因\n')
+                f2.write('-----|-----\n')
                 for ip in self.error_list:
-                    f2.write('{} |'.format(ip) + '\n')
+                    f2.write('{} | 蓝鲸basereport进程down'.format(ip) + '\n')
 
             f2.write('\n## 三、巡检内容\n\n')
             f2.write('以下是对CPU总使用率、应用内存使用率、数据盘使用率的数据简报。\n')
