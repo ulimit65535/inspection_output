@@ -93,6 +93,7 @@ class BkRoles(object):
         now = datetime.datetime.now(tz=utc_tz)
         ago_1h = now - datetime.timedelta(hours=1)
         self._time_range = "{} -- {}".format(ago_1h.isoformat(), now.isoformat())
+        #self._time_range = "2021-07-07T00:00:01+08:00 -- 2021-07-07T23:59:59+08:00"
 
     def _get_header(self):
         return {
@@ -198,6 +199,10 @@ class BkRoles(object):
             event_loop.close()
 
     def get_results(self):
+        # 去重
+        for key in self.data.keys():
+            temp_data = self.data[key]
+            self.data[key] = [dict(t) for t in set([tuple(d.items()) for d in temp_data])]
         results = {
             'total_num': self.total_num,
             'error_list': self.error_list,
@@ -245,9 +250,11 @@ class GeneratorOutput(object):
     def aggregator_md(self):
         template_file = 'templates/巡检报告.md'
         today = datetime.date.today()
-        monday = (today - datetime.timedelta(today.weekday())).strftime('%Y%m%d')
-        sunday = (today + datetime.timedelta(7 - today.weekday() - 1)).strftime('%Y%m%d')
-        output_file = 'output/周巡检报告{}-{}.md'.format(monday, sunday)
+        ago_7days = today - datetime.timedelta(days=7)
+        #monday = (today - datetime.timedelta(today.weekday())).strftime('%Y%m%d')
+        #sunday = (today + datetime.timedelta(7 - today.weekday() - 1)).strftime('%Y%m%d')
+
+        output_file = 'output/周巡检报告{}-{}.md'.format(today.strftime('%Y%m%d'), ago_7days.strftime('%Y%m%d'))
         if os.path.exists(output_file):
             os.remove(output_file)
 
