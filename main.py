@@ -254,7 +254,7 @@ class GeneratorOutput(object):
         #monday = (today - datetime.timedelta(today.weekday())).strftime('%Y%m%d')
         #sunday = (today + datetime.timedelta(7 - today.weekday() - 1)).strftime('%Y%m%d')
 
-        output_file = 'output/周巡检报告{}-{}.md'.format(today.strftime('%Y%m%d'), ago_7days.strftime('%Y%m%d'))
+        output_file = 'output/周巡检报告{}-{}.md'.format( ago_7days.strftime('%Y%m%d'), today.strftime('%Y%m%d'))
         if os.path.exists(output_file):
             os.remove(output_file)
 
